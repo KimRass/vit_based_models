@@ -18,11 +18,11 @@ from einops.layers.torch import Rearrange
 
 
 class ViTBase(nn.Module):
-    def __init__(self, width, height, n_classes, patch_size=16, hidden_size=768, n_heads=12, dropout_p=0.5):
+    def __init__(self, w, h, n_classes, patch_size=16, hidden_size=768, n_heads=12, dropout_p=0.5):
         super().__init__()
-        assert width % patch_size == 0 and height % patch_size == 0, "The resolution of the image must be divisible by `patch_size`!"
+        assert w % patch_size == 0 and h % patch_size == 0, "The resolution of the image must be divisible by `patch_size`!"
 
-        n_patches = (width // patch_size) * (height // patch_size)
+        n_patches = (w // patch_size) * (h // patch_size)
         
 
         self.flatten = Rearrange(pattern="b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=patch_size, p2=patch_size)
@@ -40,6 +40,7 @@ class ViTBase(nn.Module):
 
     def forward(self, image):
         batch_size = image.shape[0]
+        w, h = image.shape[2: 4]
 
         x = self.flatten(image)
         x = self.layernorm1(x) # Not in original paper
@@ -61,7 +62,7 @@ class ViTBase(nn.Module):
 if __name__ == "__main__":
     image = torch.randn((4, 3, 16 * 11, 16 * 17))
 
-    batch_size, channels, height, width = image.shape
-    vit_base = ViTBase(width=width, height=height, n_classes=1_000)
+    batch_size, channels, h, w = image.shape
+    vit_base = ViTBase(w=w, h=h, n_classes=1_000)
 
     vit_base(image).shape
