@@ -42,47 +42,124 @@ class SwinTransformerBlock(nn.Module):
         return x
 
 
+class PatchPartition(nn.Module):
+    def __init__(self, patch_size=4):
+        super().__init__()
+
+        self.patch_size = patch_size
+
+        self.unfold = nn.Unfold(kernel_size=patch_size, stride=patch_size, padding=0)
+    
+    def forward(self, input):
+        b, c, h, w = input.shape
+
+        new_h = h // self.patch_size
+        new_w = w // self.patch_size
+        x = self.unfold(input)
+        x = x.view((b, -1, new_h, new_w))
+        # .permute((0, 2, 3, 1))
+        return x
+
+
+class PatchMerging(nn.Module):
+    def __init__(self, downscaling_factor, hidden_size=96):
+        super().__init__()
+
+        self.downscaling_factor = downscaling_factor
+
+        self.unfold = nn.Unfold(kernel_size=downscaling_factor, stride=downscaling_factor, padding=0)
+        self.linear = nn.Linear(4 * hidden_size, 2 * hidden_size)
+    
+    def forward(self, input):
+        # input = x
+        # input.shape
+        b, c, h, w = input.shape
+
+        new_h = h // self.downscaling_factor
+        new_w = w // self.downscaling_factor
+        x = self.unfold(input)
+        x = x.view((b, -1, new_h, new_w))
+        x = x.permute((0, 2, 3, 1))
+        x = self.linear(x)
+        x = x.permute((0, 3, 1, 2))
+        return x
+
+    # def __init__(self, downscaling_factor, hidden_size=96):
+    #     super().__init__()
+
+    # def forward(self, input):
+    #     input = x
+    #     downscaling_factor=2
+        
+    #     b, h, w, c = input.shape
+
+    #     x = input.permute((0, 3, 1, 2))
+        
+    #     b, c, h, w = x.shape
+    #     x.shape
+    #     # (4, 96, 43, 70)
+
+    #     new_h = h // downscaling_factor
+    #     new_w = w // downscaling_factor
+    #     unfold = nn.Unfold(kernel_size=downscaling_factor, stride=downscaling_factor, padding=0)
+    #     unfold(x).shape
+    #     unfold(x).view((b, -1, new_h, new_w)).shape
+    #     96*4
+
+        
+    #     1680 / hidden_size / 4
+    #     1680 / 96
+    #     h
+    #     new_h
+    #     4 * new_h * new_w
+        
+    #     4*172*1680 / 2940
+    #     unfold(input).view((b, new_h, new_w, -1))
+    #     shape
+        
+
+
 class SwinTransformer(nn.Module):
-    # `patch_size`: $M$
+    # `window_size`: $M$
     # `hidden_size`: $C$
-    def __init__(self, w, h, n_classes, patch_size=7, hidden_size=96, n_heads=12, dropout_p=0.5):
-        patch_size=7
-        hidden_size=96
+    def __init__(self, w, h, patch_size=4, n_classes, window_size=7, hidden_size=96, n_layers=(2, 2, 6, 2)):
+        # window_size=7
+        # patch_size=4
+        # hidden_size=96
+        downscaling_factors = (4, 2, 2, 2)
+        downscaling_factor = downscaling_factors[0]
+        
+        patch_partition = PatchPartition()
+        linear_embedding = nn.Linear(patch_size ** 2 * 3, hidden_size)
+        patch_merging = PatchMerging(downscaling_factor=2)
 
         super().__init__()
-        assert w % patch_size == 0 and h % patch_size == 0, "The resolution of the image must be divisible by `patch_size`!"
 
-
-        n_patches = (w // patch_size) * (h // patch_size)
-
-        patch_partition = Rearrange(pattern="b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=patch_size, p2=patch_size)
-
-        patch_dim = patch_size ** 2 * 3
-        linear_embedding = nn.Linear(patch_dim, hidden_size)
-
-        self.swin_transformer_block = SwinTransformerBlock()
-        self.patch_merging = PatchMerging()
-        stage1 = nn.Sequential(
-            [
-                linear_embedding(),
-                self.swin_transformer_block()
-            ]
-        )
-        stage2 = nn.Sequential(
-            [
-                self.patch_merging(),
-                self.swin_transformer_block()
-            ]
-        )
+        # self.swin_transformer_block = SwinTransformerBlock()
+        # stage1 = nn.Sequential(
+        #     [
+        #         linear_embedding(),
+        #         self.swin_transformer_block()
+        #     ]
+        # )
+        # stage2 = nn.Sequential(
+        #     [
+        #         self.patch_merging(),
+        #         self.swin_transformer_block()
+        #     ]
+        # )
     
 
     def forward(self, image):
         image = torch.randn((4, 3, 175, 280))
-        batch_size = image.shape[0]
-        w, h = image.shape[2: 4]
-
         x = patch_partition(image)
-        # x = linear_embedding(x)
+        x = x.permute((0, 2, 3, 1))
+        x = linear_embedding(x)
+        x = x.permute((0, 3, 1, 2))
+        x.shape
+        
+        x = patch_merging(x)
+        x.shape
 
         for _ in range(2):
             x = stage1(x)
