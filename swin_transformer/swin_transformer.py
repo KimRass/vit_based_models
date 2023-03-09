@@ -1,8 +1,44 @@
-# Reference: https://github.com/berniwal/swin-transformer-pytorch
+# Reference: https://github.com/berniwal/swin-transformer-pytorch/blob/master/swin_transformer_pytorch/swin_transformer.py
 
 import torch
 import torch.nn as nn
 from einops.layers.torch import Rearrange
+
+
+class CyclicShift(nn.Module):
+    def __init__(self, displacement):
+        super().__init__()
+
+        self.displacement = displacement
+    
+    def forward(self, x):
+        x = torch.roll(input=x, shifts=(displacement, displacement), dims=(2, 3))
+        return x
+
+
+class ResidualConnection(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+
+        self.fn = fn
+
+    def forward(self, x):
+        return x + self.fn(x)
+
+
+class MLP(nn.Module):
+    def __init__(self, dim, expansion_ratio=4):
+        super().__init__()
+
+        self.linear1 = nn.Linear(dim, dim * expansion_ratio)
+        self.gelu = nn.GELU()
+        self.linear2 = nn.Linear(dim * expansion_ratio, dim)
+    
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.gelu(x)
+        x = self.linear2(x)
+        return x
 
 
 class WMSA(nn.Module):
@@ -18,27 +54,36 @@ class SWMSA(nn.Module):
 class SwinTransformerBlock(nn.Module):
     def __init__(self):
         super().__init__()
+        patch_dim = 3
 
-        self.ln1 = nn.LayerNorm(patch_dim)
-        self.wmsa = WMSA()
-        self.ln2 = nn.LayerNorm(hidden_size)
-        self.mlp = MLP()
-        self.swmsa = SWMSA()
+        # self.ln1 = nn.LayerNorm(patch_dim)
+        # self.wmsa = WMSA()
+        # self.ln2 = nn.LayerNorm(hidden_size)
+        # self.mlp = MLP(dim=)
+        # self.swmsa = SWMSA()
+        self.sequential1 = nn.Sequential(
+             nn.LayerNorm(patch_dim),
+             WMSA()
+        )
+        self.residual_connection1 = ResidualConnection(fn=self.sequential1)
+
+        self.sequential2 = nn.Sequential(
+             nn.LayerNorm(patch_dim),
+             SWMSA()
+        )
+        self.residual_connection2 = ResidualConnection(fn=self.sequential2)
+
+        self.sequential3 = nn.Sequential(
+             nn.LayerNorm(patch_dim),
+             MLP()
+        )
+        self.residual_connection3 = ResidualConnection(fn=self.sequential3)
     
-    def forward(self, image):
-        x = self.ln1(image)
-        x = self.wmsa(x)
-        x += x
-        x = self.ln2(x)
-        x = self.mlp(x)
-        x += x
-
-        x = self.ln1(x)
-        x = self.swmsa(x)
-        x += x
-        x = self.ln2(x)
-        x = self.mlp(x)
-        x += x
+    def forward(self, x):
+        x = self.residual_connection1(x)
+        x = self.residual_connection3(x)
+        x = self.residual_connection2(x)
+        x = self.residual_connection3(x)
         return x
 
 
@@ -50,12 +95,12 @@ class PatchPartition(nn.Module):
 
         self.unfold = nn.Unfold(kernel_size=patch_size, stride=patch_size, padding=0)
     
-    def forward(self, input):
-        b, c, h, w = input.shape
+    def forward(self, x):
+        b, c, h, w = x.shape
 
         new_h = h // self.patch_size
         new_w = w // self.patch_size
-        x = self.unfold(input)
+        x = self.unfold(x)
         x = x.view((b, -1, new_h, new_w))
         # .permute((0, 2, 3, 1))
         return x
@@ -70,14 +115,14 @@ class PatchMerging(nn.Module):
         self.unfold = nn.Unfold(kernel_size=downscaling_factor, stride=downscaling_factor, padding=0)
         self.linear = nn.Linear(4 * hidden_size, 2 * hidden_size)
     
-    def forward(self, input):
-        # input = x
-        # input.shape
-        b, c, h, w = input.shape
+    def forward(self, x):
+        # x = x
+        # x.shape
+        b, c, h, w = x.shape
 
         new_h = h // self.downscaling_factor
         new_w = w // self.downscaling_factor
-        x = self.unfold(input)
+        x = self.unfold(x)
         x = x.view((b, -1, new_h, new_w))
         x = x.permute((0, 2, 3, 1))
         x = self.linear(x)
@@ -87,13 +132,13 @@ class PatchMerging(nn.Module):
     # def __init__(self, downscaling_factor, hidden_size=96):
     #     super().__init__()
 
-    # def forward(self, input):
-    #     input = x
+    # def forward(self, x):
+    #     x = x
     #     downscaling_factor=2
         
-    #     b, h, w, c = input.shape
+    #     b, h, w, c = x.shape
 
-    #     x = input.permute((0, 3, 1, 2))
+    #     x = x.permute((0, 3, 1, 2))
         
     #     b, c, h, w = x.shape
     #     x.shape
@@ -114,7 +159,7 @@ class PatchMerging(nn.Module):
     #     4 * new_h * new_w
         
     #     4*172*1680 / 2940
-    #     unfold(input).view((b, new_h, new_w, -1))
+    #     unfold(x).view((b, new_h, new_w, -1))
     #     shape
         
 
