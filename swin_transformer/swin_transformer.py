@@ -12,7 +12,7 @@ class CyclicShift(nn.Module):
         self.displacement = displacement
     
     def forward(self, x):
-        x = torch.roll(input=x, shifts=(displacement, displacement), dims=(2, 3))
+        x = torch.roll(input=x, shifts=(self.displacement, self.displacement), dims=(2, 3))
         return x
 
 
